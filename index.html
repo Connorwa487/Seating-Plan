@@ -241,9 +241,20 @@ const TABLES = [
 // ─────────────────────────────────────────────
 // STATE
 // ─────────────────────────────────────────────
-let guests = []; // {id, name, category, isBridal}
+let guests = [
+  {id:1,  name:'Connor',  category:'Bridal', isBridal:true},
+  {id:2,  name:'Roda',    category:'Bridal', isBridal:true},
+  {id:3,  name:'Lok',     category:'Bridal', isBridal:true},
+  {id:4,  name:'Deb',     category:'Bridal', isBridal:true},
+  {id:5,  name:'Karan',   category:'Bridal', isBridal:true},
+  {id:6,  name:'G',       category:'Bridal', isBridal:true},
+  {id:7,  name:'Shaun',   category:'Bridal', isBridal:true},
+  {id:8,  name:'Diana',   category:'Bridal', isBridal:true},
+  {id:9,  name:'Carissa', category:'Bridal', isBridal:true},
+  {id:10, name:'Nisha',   category:'Bridal', isBridal:true}
+]; // {id, name, category, isBridal}
 let seating = {}; // "tableId:seatIdx" → guestId
-let gid = 1;
+let gid = 11;
 let dragInfo = null; // {guestId, fromTable, fromSeat}
 let catCollapsed = {}; // {catName: bool}
 
