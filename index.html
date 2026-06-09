@@ -107,6 +107,15 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #f5ede0; heig
 .empty { padding: 24px 16px; text-align: center; color: #ccc; }
 .empty .ei { font-size: 1.8rem; margin-bottom: 8px; }
 .empty p { font-size: .73rem; line-height: 1.6; }
+
+/* SYNC INDICATOR */
+.sync-dot { width:7px; height:7px; border-radius:50%; background:#aaa; flex-shrink:0; transition:.3s; }
+.sync-dot.ok { background:#4caf50; }
+.sync-dot.err { background:#e53935; }
+.sync-dot.loading { background:#ff9800; animation: pulse .8s infinite alternate; }
+@keyframes pulse { from{opacity:1} to{opacity:.3} }
+.sync-lbl { font-size:.62rem; opacity:.55; font-style:italic; }
+
 </style>
 </head>
 <body>
@@ -122,6 +131,7 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #f5ede0; heig
     <button class="btn btn-green" onclick="randomAllocate()">🎲 Random Allocate</button>
     <button class="btn btn-ghost" onclick="clearSeating()">↺ Clear Seating</button>
     <button class="btn btn-ghost" onclick="exportCSV()">↓ Export</button>
+    <span id="sync-status" style="display:flex;align-items:center;gap:4px;padding:0 4px"><span class="sync-dot loading" id="sync-dot"></span><span class="sync-lbl" id="sync-lbl">syncing…</span></span>
   </div>
 </div>
 
@@ -241,20 +251,9 @@ const TABLES = [
 // ─────────────────────────────────────────────
 // STATE
 // ─────────────────────────────────────────────
-let guests = [
-  {id:1,  name:'Connor',  category:'Bridal', isBridal:true},
-  {id:2,  name:'Roda',    category:'Bridal', isBridal:true},
-  {id:3,  name:'Lok',     category:'Bridal', isBridal:true},
-  {id:4,  name:'Deb',     category:'Bridal', isBridal:true},
-  {id:5,  name:'Karan',   category:'Bridal', isBridal:true},
-  {id:6,  name:'G',       category:'Bridal', isBridal:true},
-  {id:7,  name:'Shaun',   category:'Bridal', isBridal:true},
-  {id:8,  name:'Diana',   category:'Bridal', isBridal:true},
-  {id:9,  name:'Carissa', category:'Bridal', isBridal:true},
-  {id:10, name:'Nisha',   category:'Bridal', isBridal:true}
-]; // {id, name, category, isBridal}
+let guests = []; // {id, name, category, isBridal}
 let seating = {}; // "tableId:seatIdx" → guestId
-let gid = 11;
+let gid = 1;
 let dragInfo = null; // {guestId, fromTable, fromSeat}
 let catCollapsed = {}; // {catName: bool}
 
@@ -765,7 +764,112 @@ function toast(msg, type='') {
 // ─────────────────────────────────────────────
 // INIT
 // ─────────────────────────────────────────────
-render();
+// ──────────────────────────────────────
+// GOOGLE SHEETS LIVE SYNC
+// ──────────────────────────────────────
+const SHEET_CSV_URL = 'https://docs.google.com/spreadsheets/d/13-ZlTzqzk6Xn4pNpm2fpu41WixfjtJvyqurpC8eLg3E/export?format=csv&gid=1565923847';
+const BRIDAL_NAMES = ['Connor','Roda','Lok','Deb','Karan','G','Shaun','Diana','Carissa','Nisha'];
+const CAT_MAP = {
+  'Connor Family': "Connor's Family",
+  'Connor Friends': "Connor's Friends",
+  'Roda Family':   "Roda's Family",
+  'Roda Friends':  "Roda's Friends",
+  'Our Friends':   'Our Friends',
+  'Bridal':        'Bridal'
+};
+
+function setSyncStatus(state, msg) {
+  const dot = document.getElementById('sync-dot');
+  const lbl = document.getElementById('sync-lbl');
+  if (!dot) return;
+  dot.className = 'sync-dot ' + state;
+  lbl.textContent = msg;
+}
+
+function parseCSV(text) {
+  const lines = text.trim().split('\n');
+  const headers = lines[0].split(',').map(h => h.replace(/^"|"$/g,'').trim());
+  const nameIdx = headers.findIndex(h => h.toLowerCase() === 'guest');
+  const catIdx  = headers.findIndex(h => h.toLowerCase() === 'category');
+  const attIdx  = headers.findIndex(h => h.toLowerCase() === 'attendance');
+  if (nameIdx < 0 || catIdx < 0) return null;
+
+  const parsed = [];
+  for (let i = 1; i < lines.length; i++) {
+    // Handle quoted fields
+    const cols = [];
+    let cur = '', inQ = false;
+    for (const ch of lines[i]) {
+      if (ch === '"') { inQ = !inQ; }
+      else if (ch === ',' && !inQ) { cols.push(cur.trim()); cur = ''; }
+      else cur += ch;
+    }
+    cols.push(cur.trim());
+
+    const name = cols[nameIdx] ? cols[nameIdx].replace(/^"|"$/g,'').trim() : '';
+    const rawCat = cols[catIdx] ? cols[catIdx].replace(/^"|"$/g,'').trim() : '';
+    const att = attIdx >= 0 && cols[attIdx] ? cols[attIdx].replace(/^"|"$/g,'').trim().toLowerCase() : '';
+    if (!name || !rawCat) continue;
+    // Skip guests who are explicitly not attending
+    if (att.startsWith('not att')) continue;
+    const category = CAT_MAP[rawCat] || rawCat;
+    const isBridal = BRIDAL_NAMES.includes(name);
+    parsed.push({ name, category: isBridal ? 'Bridal' : category, isBridal });
+  }
+  return parsed;
+}
+
+let syncInterval = null;
+
+function fetchGuests() {
+  setSyncStatus('loading', 'syncing…');
+  fetch(SHEET_CSV_URL)
+    .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
+    .then(text => {
+      const parsed = parseCSV(text);
+      if (!parsed) throw new Error('Parse error');
+
+      // Rebuild guests preserving existing seating where possible
+      const newGuests = [];
+      let nextId = 1;
+      parsed.forEach(p => {
+        // Find existing guest by name to preserve their id (keeps seating intact)
+        const existing = guests.find(g => g.name === p.name);
+        if (existing) {
+          newGuests.push({ ...existing, category: p.category, isBridal: p.isBridal });
+          if (existing.id >= nextId) nextId = existing.id + 1;
+        } else {
+          // Find a free id
+          while (guests.find(g => g.id === nextId)) nextId++;
+          newGuests.push({ id: nextId++, name: p.name, category: p.category, isBridal: p.isBridal });
+        }
+      });
+
+      // Remove seating assignments for guests no longer in the list
+      const newIds = new Set(newGuests.map(g => g.id));
+      Object.keys(seating).forEach(k => { if (!newIds.has(seating[k])) delete seating[k]; });
+
+      guests = newGuests;
+      gid = nextId;
+
+      // Auto-place bridal members who aren't yet seated
+      guests.filter(g => g.isBridal).forEach(g => { if (!gSeat(g.id)) autoPlaceBridal(g); });
+
+      render();
+      const now = new Date();
+      setSyncStatus('ok', 'synced ' + now.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}));
+    })
+    .catch(err => {
+      console.error('fetchGuests error:', err);
+      setSyncStatus('err', 'sync failed');
+      if (!guests.length) render(); // still render empty state
+    });
+}
+
+// Initial fetch then refresh every 30 seconds
+fetchGuests();
+if (syncInterval) clearInterval(syncInterval);
+syncInterval = setInterval(fetchGuests, 30000);
 </script>
 </body>
 </html>
