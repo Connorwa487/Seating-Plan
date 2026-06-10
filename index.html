@@ -47,7 +47,7 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #f5ede0; heig
 .cat-guests { padding: 2px 0 2px 6px; display: flex; flex-direction: column; gap: 2px; }
 .cat-guests.collapsed { display: none; }
 
-.gchip { padding: 4px 7px 4px 9px; border-radius: 14px; font-size: .72rem; cursor: grab; display: flex; align-items: center; gap: 5px; border: 1.5px solid transparent; transition: .12s; }
+.gchip { padding: 4px 7px 4px 9px; border-radius: 14px; font-size: .72rem; cursor: grab; display: flex; align-items: center; gap: 5px; border: 1.5px solid transparent; transition: .12s; -webkit-user-select: auto; user-select: auto; }
 .gchip:active { cursor: grabbing; }
 .gchip:hover { transform: translateX(2px); box-shadow: 0 2px 7px rgba(0,0,0,.12); }
 .gchip.dragging { opacity: .35; }
